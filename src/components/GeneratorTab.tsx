@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Sparkles, Download, Loader2 } from "lucide-react";
+import { Sparkles, Download, Loader2, AlertCircle } from "lucide-react";
 import PaymentModal from "./PaymentModal";
 
 interface GeneratorTabProps {
@@ -11,20 +11,49 @@ interface GeneratorTabProps {
   price: number;
 }
 
+const HF_API_KEY = import.meta.env.VITE_HF_API_KEY || "";
+const HF_MODEL_ID = "stabilityai/stable-diffusion-2-1";
+
 const GeneratorTab = ({ type, icon, placeholder, price }: GeneratorTabProps) => {
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
 
-  const handleGenerate = () => {
-    if (!prompt.trim()) return;
+  const handleGenerate = async () => {
+    if (!prompt.trim() || type !== "picture") return;
+    
     setGenerating(true);
     setGenerated(false);
-    setTimeout(() => {
-      setGenerating(false);
+    setError(null);
+    setGeneratedImage(null);
+
+    try {
+      const response = await fetch(
+        `https://api-inference.huggingface.co/models/${HF_MODEL_ID}`,
+        {
+          headers: { Authorization: `Bearer ${HF_API_KEY}` },
+          method: "POST",
+          body: JSON.stringify({ inputs: prompt }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.statusText}`);
+      }
+
+      const result = await response.blob();
+      const url = URL.createObjectURL(result);
+      setGeneratedImage(url);
       setGenerated(true);
-    }, 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate image");
+      console.error("Generation error:", err);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const previewContent = () => {
@@ -45,13 +74,13 @@ const GeneratorTab = ({ type, icon, placeholder, price }: GeneratorTabProps) => 
       return (
         <div className="space-y-4">
           <div className="relative rounded-lg overflow-hidden aspect-video bg-muted flex items-center justify-center">
-            {type === "picture" && (
-              <div className="w-full h-full bg-gradient-to-br from-primary/30 via-secondary/30 to-accent/30 flex items-center justify-center">
-                <div className="text-center space-y-2">
-                  <Sparkles className="w-12 h-12 text-primary mx-auto" />
-                  <p className="text-foreground font-heading font-semibold">AI Generated Image</p>
-                  <p className="text-xs text-muted-foreground">"{prompt.slice(0, 50)}..."</p>
-                </div>
+            {type === "picture" && generatedImage && (
+              <div className="w-full h-full">
+                <img 
+                  src={generatedImage} 
+                  alt="Generated" 
+                  className="w-full h-full object-cover"
+                />
               </div>
             )}
             {type === "video" && (
@@ -60,8 +89,8 @@ const GeneratorTab = ({ type, icon, placeholder, price }: GeneratorTabProps) => 
                   <div className="w-16 h-16 rounded-full border-4 border-secondary flex items-center justify-center mx-auto">
                     <div className="w-0 h-0 border-l-[20px] border-l-secondary border-y-[12px] border-y-transparent ml-1" />
                   </div>
-                  <p className="text-foreground font-heading font-semibold">AI Generated Video</p>
-                  <p className="text-xs text-muted-foreground">"{prompt.slice(0, 50)}..."</p>
+                  <p className="text-foreground font-heading font-semibold">Coming Soon</p>
+                  <p className="text-xs text-muted-foreground">Video generation coming soon</p>
                 </div>
               </div>
             )}
@@ -81,8 +110,8 @@ const GeneratorTab = ({ type, icon, placeholder, price }: GeneratorTabProps) => 
                       />
                     ))}
                   </div>
-                  <p className="text-foreground font-heading font-semibold">AI Generated Music</p>
-                  <p className="text-xs text-muted-foreground">"{prompt.slice(0, 50)}..."</p>
+                  <p className="text-foreground font-heading font-semibold">Coming Soon</p>
+                  <p className="text-xs text-muted-foreground">Music generation coming soon</p>
                 </div>
               </div>
             )}
@@ -93,6 +122,26 @@ const GeneratorTab = ({ type, icon, placeholder, price }: GeneratorTabProps) => 
           >
             <Download className="w-5 h-5 mr-2" />
             Download — KSH {price}
+          </Button>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="flex flex-col items-center justify-center gap-3 py-16">
+          <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+            <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400" />
+          </div>
+          <p className="text-foreground font-medium">Generation Failed</p>
+          <p className="text-xs text-muted-foreground text-center max-w-xs">{error}</p>
+          <Button 
+            onClick={() => setError(null)}
+            variant="outline"
+            size="sm"
+            className="mt-2"
+          >
+            Try Again
           </Button>
         </div>
       );
@@ -126,7 +175,7 @@ const GeneratorTab = ({ type, icon, placeholder, price }: GeneratorTabProps) => 
           />
           <Button
             onClick={handleGenerate}
-            disabled={!prompt.trim() || generating}
+            disabled={!prompt.trim() || generating || type !== "picture"}
             className="w-full gradient-primary text-primary-foreground font-heading font-semibold h-11 hover:opacity-90 transition-opacity"
           >
             {generating ? (
@@ -137,12 +186,12 @@ const GeneratorTab = ({ type, icon, placeholder, price }: GeneratorTabProps) => 
             ) : (
               <span className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4" />
-                Generate {type.charAt(0).toUpperCase() + type.slice(1)}
+                {type === "picture" ? "Generate Picture" : `Generate ${type.charAt(0).toUpperCase() + type.slice(1)} (Coming Soon)`}
               </span>
             )}
           </Button>
           <p className="text-xs text-muted-foreground text-center">
-            Free to create • Pay only when downloading
+            {type === "picture" ? "Free AI image generation using Hugging Face" : "Free to create • Pay only when downloading"}
           </p>
         </div>
 
